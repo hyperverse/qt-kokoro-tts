@@ -3,3 +3,15 @@ build-*/
 *.user
 .cache/
 compile_commands.json
+
+# makepkg working dirs and output. Scoped to packaging/ because the project's
+# own sources live in a top-level src/.
+packaging/src/
+packaging/pkg/
+packaging/*.pkg.tar.*
+packaging/*.log
+
+# Bare clone makepkg caches to avoid refetching the source on every build. It
+# is named after the source entry in PKGBUILD, and being a git repo inside this
+# one it would otherwise commit git's own hook samples and a packfile.
+packaging/qt-kokoro-tts/
