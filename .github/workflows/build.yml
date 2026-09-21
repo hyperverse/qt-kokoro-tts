@@ -17,11 +17,18 @@ jobs:
     container:
       image: archlinux:latest
 
-    defaults:
-      run:
-        working-directory: packaging
-
     steps:
+      - name: Install git ahead of the checkout
+        # actions/checkout runs inside the container, and archlinux:latest has
+        # no git. Without it the action silently falls back to downloading a
+        # tarball over the REST API, leaving no .git for the build step to
+        # clone from. The keyring is refreshed first to avoid signature errors.
+        run: |
+          # Speed up downloads
+          sed -i 's/^#ParallelDownloads = 5/ParallelDownloads = 15/' /etc/pacman.conf
+          pacman -Syu --noconfirm archlinux-keyring
+          pacman -S --noconfirm --needed git
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -29,53 +36,49 @@ jobs:
           # commit to hand it.
           fetch-depth: 0
 
-      - name: Install build tools and linter
-        working-directory: .
-        run: |
-          # Speed up downloads
-          sed -i 's/^#ParallelDownloads = 5/ParallelDownloads = 15/' /etc/pacman.conf
-          # Refresh keyring first to avoid signature errors, then install tools.
-          # bash is installed explicitly so later steps can use `shell: bash`
-          # (the container's default `run:` shell is sh, which lacks `source`/arrays).
-          pacman -Syu --noconfirm archlinux-keyring
-          pacman -S --noconfirm --needed bash base-devel git namcap
+      - name: Install remaining build tools and linter
+        # bash is installed explicitly so later steps can use `shell: bash`
+        # (the container's default `run:` shell is sh, which lacks `source`/arrays).
+        run: pacman -S --noconfirm --needed bash base-devel namcap
 
       - name: Set up non-root builder
         # makepkg refuses to run as root; the container's default user is root.
-        working-directory: .
         run: |
           useradd -m -G wheel builder
           printf 'builder ALL=(ALL) NOPASSWD: ALL\n' >> /etc/sudoers
+          # builder both reads the checkout and clones from it; git rejects a
+          # repository owned by someone else as "dubious ownership".
           chown -R builder .
-          # Both builder and root touch this checkout; without this git calls
-          # it "dubious ownership" and refuses to read it.
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          sudo -u builder git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Lint PKGBUILD
         # Lint the real PKGBUILD, before the rewrite below replaces its source.
+        working-directory: packaging
         run: namcap PKGBUILD
 
       - name: Build the commit that triggered this run, not the released tag
         # The PKGBUILD pins its source to `#tag=v$pkgver` so that an installed
         # package always corresponds to an identifiable commit. Left alone, CI
-        # would rebuild v0.1.0 on every push and stay green while master is
+        # would rebuild v0.1.0 on every push and report green while master is
         # broken. Point it at this checkout instead; the version string still
         # says 0.1.0, so the artifact is a build check, not a release.
+        working-directory: packaging
         run: |
           sed -i "s|^source=.*|source=(\"\$pkgname::git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA\")|" PKGBUILD
           grep '^source=' PKGBUILD
 
       - name: Install build/runtime dependencies declared in PKGBUILD
+        working-directory: packaging
         shell: bash
         run: |
           source PKGBUILD
           pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}"
 
       - name: Build package
+        working-directory: packaging
         run: sudo -u builder makepkg --noconfirm
 
       - name: Lint built package with namcap
+        working-directory: packaging
         run: namcap *.pkg.tar.zst
 
       - name: Upload built package
