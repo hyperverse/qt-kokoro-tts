@@ -14,6 +14,7 @@
 #include <QtEndian>
 
 #include <cmath>
+#include <cstring>
 
 using namespace Qt::StringLiterals;
 
@@ -245,6 +246,30 @@ bool KokoroEngine::parseWav(const QByteArray &wav, QAudioFormat *format, QByteAr
                 fmt.setSampleFormat(QAudioFormat::Int32);
             else
                 return false;
+
+            // Kokoro synthesises mono, which output stacks route to the first
+            // speaker alone rather than centring it, so duplicate the single
+            // channel into both. Doing it here keeps durationForBytes() and
+            // therefore the word timings correct, since bytes and channels
+            // both double.
+            if (channels == 1) {
+                const qsizetype sample = bitsPerSample / 8;
+                const qsizetype frames = samples->size() / sample;
+                QByteArray stereo(frames * sample * 2, Qt::Uninitialized);
+                const char *src = samples->constData();
+                char *dst = stereo.data();
+                for (qsizetype i = 0; i < frames; ++i) {
+                    std::memcpy(dst, src + i * sample, sample);
+                    std::memcpy(dst + sample, src + i * sample, sample);
+                    dst += 2 * sample;
+                }
+                *samples = stereo;
+                // Position the pair as front left/right. Without this Qt
+                // leaves them unlabelled (aux0/aux1) and the output stack has
+                // no basis for sending them to the two speakers.
+                fmt.setChannelConfig(QAudioFormat::ChannelConfigStereo);
+            }
+
             if (!fmt.isValid())
                 return false;
             *format = fmt;
