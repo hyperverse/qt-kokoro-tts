@@ -1,5 +1,7 @@
 # qt-kokoro-tts
 
+![build](https://github.com/hyperverse/qt-kokoro-tts/actions/workflows/build.yml/badge.svg)
+
 A Qt 6 `QTextToSpeech` engine plugin backed by [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M),
 so any Qt application can read text in a neural voice instead of espeak-ng.
 

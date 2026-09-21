@@ -1,0 +1,86 @@
+name: build
+
+# When this workflow runs:
+#   - on every push to master (validates the latest committed state)
+#   - on manual trigger via the "Run workflow" button on GitHub
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Run on GitHub's Ubuntu runner, but inside an Arch Linux container so
+    # makepkg/namcap/pacman are available. This validates the PKGBUILD on a
+    # clean Arch environment, not just on the maintainer's machine.
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    defaults:
+      run:
+        working-directory: packaging
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # makepkg clones the work tree below, and a shallow clone has no
+          # commit to hand it.
+          fetch-depth: 0
+
+      - name: Install build tools and linter
+        working-directory: .
+        run: |
+          # Speed up downloads
+          sed -i 's/^#ParallelDownloads = 5/ParallelDownloads = 15/' /etc/pacman.conf
+          # Refresh keyring first to avoid signature errors, then install tools.
+          # bash is installed explicitly so later steps can use `shell: bash`
+          # (the container's default `run:` shell is sh, which lacks `source`/arrays).
+          pacman -Syu --noconfirm archlinux-keyring
+          pacman -S --noconfirm --needed bash base-devel git namcap
+
+      - name: Set up non-root builder
+        # makepkg refuses to run as root; the container's default user is root.
+        working-directory: .
+        run: |
+          useradd -m -G wheel builder
+          printf 'builder ALL=(ALL) NOPASSWD: ALL\n' >> /etc/sudoers
+          chown -R builder .
+          # Both builder and root touch this checkout; without this git calls
+          # it "dubious ownership" and refuses to read it.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sudo -u builder git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Lint PKGBUILD
+        # Lint the real PKGBUILD, before the rewrite below replaces its source.
+        run: namcap PKGBUILD
+
+      - name: Build the commit that triggered this run, not the released tag
+        # The PKGBUILD pins its source to `#tag=v$pkgver` so that an installed
+        # package always corresponds to an identifiable commit. Left alone, CI
+        # would rebuild v0.1.0 on every push and stay green while master is
+        # broken. Point it at this checkout instead; the version string still
+        # says 0.1.0, so the artifact is a build check, not a release.
+        run: |
+          sed -i "s|^source=.*|source=(\"\$pkgname::git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA\")|" PKGBUILD
+          grep '^source=' PKGBUILD
+
+      - name: Install build/runtime dependencies declared in PKGBUILD
+        shell: bash
+        run: |
+          source PKGBUILD
+          pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}"
+
+      - name: Build package
+        run: sudo -u builder makepkg --noconfirm
+
+      - name: Lint built package with namcap
+        run: namcap *.pkg.tar.zst
+
+      - name: Upload built package
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-kokoro-tts-pkg
+          path: "packaging/*.pkg.tar.zst"
+          if-no-files-found: error
