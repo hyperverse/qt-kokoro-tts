@@ -1,0 +1,37 @@
+# Maintainer: github.com/hyperverse
+
+pkgname=qt-kokoro-tts
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Qt TextToSpeech plugin backed by Kokoro-82M (neural TTS for Qt apps)"
+arch=(x86_64)
+license=(MIT)
+url="https://github.com/hyperverse/qt-kokoro-tts"
+depends=(qt6-base qt6-multimedia qt6-speech)
+makedepends=(cmake git)
+optdepends=(
+  'curl: fetch the Kokoro model via install-kokoro-backend.sh'
+)
+source=("git+https://github.com/hyperverse/qt-kokoro-tts.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname"
+  cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_TOOLS=ON
+  cmake --build build -j"$(nproc)"
+}
+
+package() {
+  cd "$pkgname"
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 packaging/kokoro-server.service \
+    "$pkgdir/usr/lib/systemd/user/kokoro-server.service"
+  install -Dm755 packaging/install-kokoro-backend.sh \
+    "$pkgdir/usr/bin/install-kokoro-backend"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname"
+}

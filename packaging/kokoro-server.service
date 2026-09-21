@@ -1,0 +1,19 @@
+[Unit]
+Description=Kokoro TTS server (OpenAI-compatible, localhost only)
+Documentation=https://github.com/hyperverse/qt-kokoro-tts
+After=network.target
+
+[Service]
+Type=simple
+Environment=KOKORO_HOME=%h/.local/share/kokoro
+ExecStart=%h/.local/share/kokoro/linux-x86_64/koko \
+    -m %h/.local/share/kokoro/kokoro-v1.0.onnx \
+    -d %h/.local/share/kokoro/voices-v1.0.bin \
+    openai --ip 127.0.0.1 --port 8099
+Restart=on-failure
+RestartSec=2
+# The model is ~330 MB resident; keep it loaded so requests stay warm.
+MemoryHigh=2G
+
+[Install]
+WantedBy=default.target

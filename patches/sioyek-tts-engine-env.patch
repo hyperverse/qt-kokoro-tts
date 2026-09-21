@@ -1,0 +1,17 @@
+diff --git a/pdf_viewer/utils.cpp b/pdf_viewer/utils.cpp
+index a2cb50a..6c51842 100644
+--- a/pdf_viewer/utils.cpp
++++ b/pdf_viewer/utils.cpp
+@@ -4292,7 +4292,11 @@ QString get_status_font_face_name() {
+ 
+ 
+ QtTextToSpeechHandler::QtTextToSpeechHandler() {
+-    tts = new QTextToSpeech();
++    // Qt's default engine is a hardcoded platform choice (speechd on Unix) with
++    // no built-in way to override it, which makes third-party engine plugins
++    // unreachable. Allow one to be named explicitly.
++    const QString tts_engine = qEnvironmentVariable("SIOYEK_TTS_ENGINE");
++    tts = tts_engine.isEmpty() ? new QTextToSpeech() : new QTextToSpeech(tts_engine);
+ }
+ 
+ QtTextToSpeechHandler::~QtTextToSpeechHandler() {
